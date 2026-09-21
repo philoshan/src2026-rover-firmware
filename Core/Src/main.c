@@ -41,10 +41,10 @@ typedef struct {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 /* Motor & Encoder Specifications */
-#define GEAR_RATIO          56.0f              /**< 56:1 Gearbox reduction */
+#define GEAR_RATIO          131.0f             /**< 131:1 Gearbox reduction (SPG30E-GR131) */
 #define ENCODER_PPR         13.0f              /**< 13 pulses per motor rev */
 #define ENCODER_CPR         (ENCODER_PPR * 4.0f) /**< 52 ticks in 4x mode */
-#define TICKS_PER_REV       (ENCODER_CPR * GEAR_RATIO) /**< 2912.0 ticks per wheel rev */
+#define TICKS_PER_REV       (ENCODER_CPR * GEAR_RATIO) /**< 6812.0 ticks per wheel rev */
 
 /* Wheel radius R (Diameter 96mm -> Radius 48mm = 0.048m) */
 #define WHEEL_RADIUS_M      0.048f             /**< Radius R = 48mm = 0.048m (Diameter 96mm) */
@@ -369,6 +369,8 @@ int main(void)
           Motor_StopAll();
           for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
             Encoder_Reset((MotorID)i);
+            wheels[i].last_raw_count = 0;
+            wheels[i].total_count = 0;
           }
           step = 0; /* Loop test sequence */
           step_start_time = now + 1000; /* 2s pause */

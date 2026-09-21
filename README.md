@@ -3,12 +3,13 @@
 This project is an STM32-based motor control firmware for a 4-wheel rover. It features PWM motor control, quadrature encoder reading, and basic kinematics calculation (RPM, angular velocity, and linear velocity) for each wheel.
 
 ## Hardware Specifications
-- **Microcontroller**: STM32F446RET6 (e.g., NUCLEO-F446RE)
-- **Motor Configuration**: 4 DC Motors
-- **Encoders**: Quadrature Encoders
-  - Gear Ratio: 56:1
-  - Encoder PPR: 13 (52 CPR)
-  - Ticks per Revolution: 2912.0
+- **Microcontroller**: STM32F446RET6 (NUCLEO-F446RE)
+- **Motor Driver**: Cytron MDD3A (2-PWM mode)
+- **Motors**: 4 x SPG30E-GR131 (12V 37MM DC Geared Motor)
+- **Encoders**: Magnetic Quadrature Encoders (Hall Effect)
+  - Gear Ratio: 131:1
+  - Encoder PPR: 13 (52 CPR with 4x decoding)
+  - Ticks per Revolution: 6812.0
 - **Wheel Radius**: 48mm (96mm Diameter)
 
 ## Features
