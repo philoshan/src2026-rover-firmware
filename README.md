@@ -30,36 +30,50 @@ This project is an STM32-based motor control firmware for a 4-wheel rover. It fe
 
 ## Pin Configuration (Wiring Guide)
 
-### 1. Drive Motors (Cytron MDD3A)
-| Motor | STM32 Pin | Timer/Channel | Function |
-| :--- | :--- | :--- | :--- |
-| **M1** | PA5 / PB3 | `TIM2_CH1` / `CH2` | Motor 1 Forward / Reverse |
-| **M2** | PB14 / PB15 | `TIM12_CH1` / `CH2`| Motor 2 Forward / Reverse |
-| **M3** | PA6 / PA7 | `TIM3_CH1` / `CH2` | Motor 3 Forward / Reverse |
-| **M4** | PB0 / PB1 | `TIM3_CH3` / `CH2` | Motor 4 Forward / Reverse |
+### 1. Drive Motors (Cytron MDD3A PWM)
+| STM32 Pin | Timer/Channel | 연결 대상 (Target) |
+| :--- | :--- | :--- |
+| **PA5** | `TIM2_CH1` | MDD3A #1 → M1A |
+| **PB3** | `TIM2_CH2` | MDD3A #1 → M1B |
+| **PB14**| `TIM12_CH1` | MDD3A #1 → M2A |
+| **PB15**| `TIM12_CH2` | MDD3A #1 → M2B |
+| **PA6** | `TIM3_CH1` | MDD3A #2 → M1A |
+| **PA7** | `TIM3_CH2` | MDD3A #2 → M1B |
+| **PB0** | `TIM3_CH3` | MDD3A #2 → M2A |
+| **PB1** | `TIM3_CH4` | MDD3A #2 → M2B |
 
-### 2. Encoders (Quadrature x4)
-| Encoder | STM32 Pin | Timer | Note |
-| :--- | :--- | :--- | :--- |
-| **Enc 1** | PA8 / PA9 | `TIM1` | 16-bit Timer |
-| **Enc 2** | PB6 / PB7 | `TIM4` | 16-bit Timer |
-| **Enc 3** | PA0 / PA1 | `TIM5` | **32-bit Timer** |
-| **Enc 4** | PC6 / PC7 | `TIM8` | 16-bit Timer |
+### 2. Encoders (모터의 노랑/흰색 선)
+| STM32 Pin | Timer/Channel | 연결 대상 (Target) |
+| :--- | :--- | :--- |
+| **PA8** | `TIM1_CH1` | Motor 1 인코더 Yellow (채널A) |
+| **PA9** | `TIM1_CH2` | Motor 1 인코더 White (채널B) |
+| **PB6** | `TIM4_CH1` | Motor 2 인코더 Yellow |
+| **PB7** | `TIM4_CH2` | Motor 2 인코더 White |
+| **PA0** | `TIM5_CH1` | Motor 3 인코더 Yellow |
+| **PA1** | `TIM5_CH2` | Motor 3 인코더 White |
+| **PC6** | `TIM8_CH1` | Motor 4 인코더 Yellow |
+| **PC7** | `TIM8_CH2` | Motor 4 인코더 White |
 
-### 3. Steering Servos (Feetech STS3215) & Power
+### 3. Steering Servos (Feetech STS3215)
+> ⚠️ **주의 (핀 변경 내역)**: 기존에 논의되었던 UART1(PA9/PA10)은 Motor 1 엔코더(PA9)와의 **핀 충돌을 피하기 위해 USART3(PB10/PB11)로 교체**되었습니다.
 > **Direct Single-Wire Connection** (No external adapter needed)
 
-| STM32 Pin | Target Pin | Note |
+| STM32 Pin | 연결 대상 (Target) | Note |
 | :--- | :--- | :--- |
 | **PB10** (`USART3_TX`) | Servo **BUS (Data)** | Single-Wire HDSEL mode (Open-Drain). Connect directly to servo signal wire. |
-| **GND** | 12V Power **GND** | **MUST be connected to Common Ground!** |
-| **Not Connected** | Servo **VCC** | Connect servo VCC directly to external 12V supply (+). |
 
-### 4. Debug & Terminal Interface
-| STM32 Pin | Target Pin | Note |
+### 4. 공통 전원 및 GND (Power/GND)
+| STM32 Pin | 연결 대상 (Target) | Note |
 | :--- | :--- | :--- |
-| **PA2** (`USART2_TX`) | ST-LINK VCP | 115200 bps |
-| **PA3** (`USART2_RX`) | ST-LINK VCP | 115200 bps, Terminal Command Input |
+| **GND** | MDD3A #1 GND, MDD3A #2 GND, 모터 4개 인코더 Green(각각), 외부 12V 전원 GND, 서보 모터 GND | **MUST be connected to Common Ground!** |
+| **3.3V 또는 5V** | 모터 4개 인코더 Blue(각각) | 전압 레벨 확인 필요 |
+| **Not Connected** | 서보 모터 VCC | ⚠️ **STM32에 절대 연결 금지!** 12V 외부 전원에만 직결 |
+
+### 5. Debug & Terminal Interface
+| STM32 Pin | 연결 대상 (Target) | Note |
+| :--- | :--- | :--- |
+| **PA2** | `USART2_TX` | ST-LINK VCP (115200 bps) |
+| **PA3** | `USART2_RX` | ST-LINK VCP (115200 bps, Terminal Command Input) |
 
 ## How to Build
 This project uses a standard Makefile. 
