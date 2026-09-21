@@ -22,9 +22,13 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
+#include <string.h>
 #include "motor.h"
 #include "encoder.h"
+#include "sts3215.h"
+#include "joint.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -67,6 +71,12 @@ TIM_HandleTypeDef htim12;
 
 /* USER CODE BEGIN PV */
 
+/* === 터미널 명령 수신 버퍼 (USART2 RX 인터럽트) === */
+#define CMD_BUF_SIZE  64
+static char     cmd_buf[CMD_BUF_SIZE];  /**< 줄 단위 명령 버퍼 */
+static uint8_t  cmd_idx = 0;            /**< 현재 버퍼 인덱스 */
+static volatile uint8_t cmd_ready = 0;  /**< 1이면 완성된 명령이 있음 */
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -81,6 +91,10 @@ static void MX_TIM8_Init(void);
 static void MX_TIM12_Init(void);
 /* USER CODE BEGIN PFP */
 static void MX_USART2_Init(void);
+static void MX_USART3_Init(void);
+static void servo_boot_sequence(void);
+static void process_command(const char *cmd);
+static void print_help(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -133,6 +147,221 @@ int _isatty(int file)                     { (void)file; return 1; }
 int _lseek(int file, int ptr, int dir)    { (void)file; (void)ptr; (void)dir; return 0; }
 #include <sys/stat.h>
 int _fstat(int file, struct stat *st)     { (void)file; st->st_mode = S_IFCHR; return 0; }
+int _getpid(void)                         { return 1; }
+int _kill(int pid, int sig)               { (void)pid; (void)sig; return -1; }
+
+/* ================================================================== */
+/*        USART3 초기화 — STS3215 서보 통신 (PB10/PB11, 1Mbps)        */
+/* ================================================================== */
+static void MX_USART3_Init(void)
+{
+  /* GPIO 클럭 및 USART3 클럭 활성화 */
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_USART3_CLK_ENABLE();
+
+  /* PB10: USART3_TX (Single-Wire Half-Duplex 모드, 이 핀 하나로 송수신 동시 처리) */
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Pin = GPIO_PIN_10;                 /* PB10 하나만 사용 */
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;            /* ★ 반드시 Open-Drain으로 설정 */
+  GPIO_InitStruct.Pull = GPIO_PULLUP;                /* 내부 풀업 활성화 */
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* Configure Baud rate 1000000 (1Mbps, Auto-calculated based on APB1 clock) */
+  uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
+  USART3->BRR = (pclk1 + (1000000 / 2)) / 1000000;
+  
+  /* CR3: HDSEL (Half-Duplex Selection) 비트 세트 */
+  USART3->CR3 |= USART_CR3_HDSEL;
+  
+  /* CR1: 송수신 활성화 및 USART 활성화 */
+  USART3->CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;
+}
+
+/* ================================================================== */
+/*        USART2 RX 인터럽트 초기화 및 바이트 처리 루틴               */
+/* ================================================================== */
+static void MX_USART2_RxInt_Init(void)
+{
+  /* USART2 RXNE 인터럽트 활성화 */
+  USART2->CR1 |= USART_CR1_RXNEIE;
+  HAL_NVIC_SetPriority(USART2_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(USART2_IRQn);
+}
+
+void USART2_Process_Rx_Byte(uint8_t byte)
+{
+  char ch = (char)byte;
+
+  /* 엔터(\r 또는 \n) → 명령 완성 */
+  if (ch == '\r' || ch == '\n')
+  {
+    if (cmd_idx > 0 && !cmd_ready)
+    {
+      cmd_buf[cmd_idx] = '\0';
+      cmd_ready = 1;
+    }
+  }
+  else if (cmd_idx < CMD_BUF_SIZE - 1 && !cmd_ready)
+  {
+    cmd_buf[cmd_idx++] = ch;
+  }
+}
+
+/* ================================================================== */
+/*              서보 부팅 시퀀스 — PING → 토크 ON → 준비              */
+/* ================================================================== */
+static void servo_boot_sequence(void)
+{
+  printf("\r\n--------------------------------------------------\r\n");
+  printf("       STS3215 Servo Bus Initialization            \r\n");
+  printf("--------------------------------------------------\r\n");
+  printf("USART3: PB10(TX)/PB11(RX), 1,000,000 bps\r\n");
+  printf("Servo Count: %d\r\n\r\n", SERVO_COUNT);
+
+  /* 1. 각 서보 PING */
+  uint8_t servo_ids[] = {1, 2, 3, 4};  /* SERVO_COUNT=4 기준 */
+  uint8_t all_ok = 1;
+
+  for (int i = 0; i < SERVO_COUNT; i++)
+  {
+    STS_Status ret = sts_ping(servo_ids[i]);
+    if (ret == STS_OK)
+    {
+      printf("  Servo ID=%d: OK (응답 정상)\r\n", servo_ids[i]);
+    }
+    else
+    {
+      printf("  Servo ID=%d: FAIL (err=%d)\r\n", servo_ids[i], ret);
+      all_ok = 0;
+    }
+  }
+
+  if (!all_ok)
+  {
+    printf("\r\n[경고] 일부 서보 응답 없음. 배선/전원/ID 확인 필요.\r\n");
+    printf("  점검: TX/RX 교차, GND 공통, 1Mbps 보레이트, 어댑터 모드\r\n");
+  }
+
+  /* 2. 관절 모듈 초기화 (가속도 설정 + 토크 ON) */
+  joint_init();
+
+  printf("\r\n>>> Servo System Ready! <<<\r\n");
+  printf("터미널 명령어: T / P / S / ON / OFF / PING / HELP\r\n");
+  printf("--------------------------------------------------\r\n\r\n");
+}
+
+/* ================================================================== */
+/*              터미널 명령 파서 — 줄 단위 텍스트 처리                 */
+/* ================================================================== */
+static void process_command(const char *cmd)
+{
+  /* --- "T 10.5 -20" : 목표 각도 설정 --- */
+  if (cmd[0] == 'T' || cmd[0] == 't')
+  {
+    float angles[SERVO_COUNT] = {0};
+    int parsed = 0;
+
+    /* "T" 이후의 숫자들을 파싱 */
+    const char *p = cmd + 1;
+    for (int i = 0; i < SERVO_COUNT; i++)
+    {
+      char *endp;
+      float val = strtof(p, &endp);
+      if (endp == p) break;  /* 더 이상 숫자 없음 */
+      angles[i] = val;
+      parsed++;
+      p = endp;
+    }
+
+    if (parsed > 0)
+    {
+      printf("[CMD] 목표 각도:");
+      for (int i = 0; i < parsed; i++)
+      {
+        printf(" %.1f", angles[i]);
+      }
+      printf(" (도)\r\n");
+
+      on_target_angles_received(angles, parsed);
+    }
+    else
+    {
+      printf("[CMD] 사용법: T <각1> <각2> <각3> <각4>  (예: T 45 -45 45 -45)\r\n");
+    }
+  }
+  /* --- "P" : 현재 각도 출력 --- */
+  else if (cmd[0] == 'P' || cmd[0] == 'p')
+  {
+    printf("[현재 각도]\r\n");
+    for (int i = 0; i < SERVO_COUNT; i++)
+    {
+      float angle = joint_get_angle(i);
+      int16_t pos = sts_read_position(i + 1);  /* ID = i+1 */
+      printf("  Servo %d: %.1f deg (raw pos=%d)\r\n", i + 1, angle, pos);
+    }
+  }
+  /* --- "S 200" : 이동 속도 설정 --- */
+  else if (cmd[0] == 'S' || cmd[0] == 's')
+  {
+    int speed = 0;
+    if (sscanf(cmd + 1, "%d", &speed) == 1 && speed >= 0)
+    {
+      joint_set_speed((uint16_t)speed);
+    }
+    else
+    {
+      printf("[CMD] 사용법: S <속도>  (예: S 200, S 0=최대속도)\r\n");
+    }
+  }
+  /* --- "ON" : 토크 ON --- */
+  else if ((cmd[0] == 'O' || cmd[0] == 'o') && (cmd[1] == 'N' || cmd[1] == 'n'))
+  {
+    joint_set_torque_all(1);
+  }
+  /* --- "OFF" : 토크 OFF --- */
+  else if ((cmd[0] == 'O' || cmd[0] == 'o') && (cmd[1] == 'F' || cmd[1] == 'f'))
+  {
+    joint_set_torque_all(0);
+  }
+  /* --- "PING" : 연결 확인 --- */
+  else if (strncmp(cmd, "PING", 4) == 0 || strncmp(cmd, "ping", 4) == 0)
+  {
+    for (int i = 0; i < SERVO_COUNT; i++)
+    {
+      STS_Status ret = sts_ping(i + 1);
+      printf("  Servo ID=%d: %s\r\n", i + 1, (ret == STS_OK) ? "OK" : "FAIL");
+    }
+  }
+  /* --- "HELP" : 사용법 --- */
+  else if (strncmp(cmd, "HELP", 4) == 0 || strncmp(cmd, "help", 4) == 0)
+  {
+    print_help();
+  }
+  /* --- 알 수 없는 명령 --- */
+  else
+  {
+    printf("[CMD] 알 수 없는 명령: '%s'\r\n", cmd);
+    print_help();
+  }
+}
+
+static void print_help(void)
+{
+  printf("========== 서보 명령어 도움말 ==========\r\n");
+  printf("  T <a1> <a2>  : 목표 각도 설정 (도)\r\n");
+  printf("                 예) T 10.5 -20\r\n");
+  printf("  P            : 현재 각도 출력\r\n");
+  printf("  S <speed>    : 이동 속도 설정 (0=최대)\r\n");
+  printf("                 예) S 200\r\n");
+  printf("  ON           : 토크 ON\r\n");
+  printf("  OFF          : 토크 OFF\r\n");
+  printf("  PING         : 서보 연결 확인\r\n");
+  printf("  HELP         : 이 도움말\r\n");
+  printf("========================================\r\n");
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -181,6 +410,13 @@ int main(void)
   printf("==================================================\r\n");
   printf("Baud rate: 115200 bps\r\n");
   printf("Motor Speed: +/-400 (PWM Duty ~50%%)\r\n\r\n");
+
+  /* === 서보 모터 초기화 === */
+  MX_USART3_Init();           /* USART3 (PB10/PB11, 1Mbps) 레지스터 초기화 */
+  sts_init();                 /* STS3215 드라이버 초기화 */
+  MX_USART2_RxInt_Init();     /* USART2 RX 인터럽트 활성화 */
+  servo_boot_sequence();      /* PING → 토크 ON → 준비 완료 메시지 */
+
   HAL_Delay(1000);
   /* USER CODE END 2 */
 
@@ -384,6 +620,15 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    /* 3. 서보 터미널 명령 처리 (비블로킹) */
+    if (cmd_ready)
+    {
+      process_command(cmd_buf);
+      cmd_idx = 0;
+      cmd_ready = 0;
+    }
+
   }
   /* USER CODE END 3 */
 }

@@ -1,41 +1,70 @@
 # STM32 Rover Motor Control
 
-This project is an STM32-based motor control firmware for a 4-wheel rover. It features PWM motor control, quadrature encoder reading, and basic kinematics calculation (RPM, angular velocity, and linear velocity) for each wheel.
+This project is an STM32-based motor control firmware for a 4-wheel rover. It features PWM DC motor control, quadrature encoder reading, basic kinematics calculation, and **Feetech STS3215 Serial Bus Servo control** for steering.
 
 ## Hardware Specifications
 - **Microcontroller**: STM32F446RET6 (NUCLEO-F446RE)
-- **Motor Driver**: Cytron MDD3A (2-PWM mode)
-- **Motors**: 4 x SPG30E-GR131 (12V 37MM DC Geared Motor)
-- **Encoders**: Magnetic Quadrature Encoders (Hall Effect)
-  - Gear Ratio: 131:1
-  - Encoder PPR: 13 (52 CPR with 4x decoding)
-  - Ticks per Revolution: 6812.0
-- **Wheel Radius**: 48mm (96mm Diameter)
+- **Motor Driver**: Cytron MDD3A (4-channel, 2-PWM mode)
+- **Drive Motors**: 4 x SPG30E-GR131 (12V DC Geared Motor)
+  - Gear Ratio: 131:1 / Ticks per Revolution: 6812.0
+- **Steering Servos**: 4 x Feetech STS3215 (Serial Bus Servo)
+  - ID 1~4, Daisy-chained
+  - 1Mbps Single-Wire Half-Duplex Communication
 
 ## Features
-- **Motor Control**: Forward, reverse, and stop using PWM (TIM2, TIM3, TIM12).
-- **Encoder Reading**: Hardware timer-based encoder reading (TIM1, TIM4, TIM5, TIM8).
-- **Kinematics Calculation**:
-  - Calculates wheel RPM
-  - Calculates angular velocity (rad/s)
-  - Calculates linear velocity (m/s)
-- **UART Debugging**: Prints detailed status every 100ms over USART2 (115200 bps).
-- **Automated Test Sequence**: Built-in routine to test each motor forward and backward automatically on startup.
+- **Drive Motor Control**: Forward, reverse, and stop using hardware PWM.
+- **Encoder Reading**: Hardware timer-based x4 quadrature decoding.
+- **Servo Motor Control (NEW)**:
+  - Custom UART protocol implementation without HAL overhead.
+  - **Single-Wire Half-Duplex (HDSEL) mode**: Direct connection without external diode/adapter board!
+  - Sync-write multiple servos simultaneously.
+- **Interactive Terminal Interface**: Control servo angles in real-time via Serial Monitor.
 
-## Requirements
-- STM32CubeIDE (or compatible ARM GCC toolchain)
-- ST-LINK Utility or OpenOCD for flashing
+## Terminal Commands (115200 bps, LF or CRLF)
+| Command | Description |
+| :--- | :--- |
+| `PING` | Check connection status for all 4 servos |
+| `T <a1> <a2> <a3> <a4>` | Move servos to target angles (e.g., `T 45 -45 45 -45`) |
+| `P` | Print current angles of all servos |
+| `ON` / `OFF` | Enable or disable servo torque |
 
-## How to Build and Run
-1. Clone the repository.
-2. Open the project in STM32CubeIDE using the `.project` and `.cproject` files.
-3. Build the project (`Project -> Build All`).
-4. Connect the STM32 board via ST-LINK.
-5. Flash the firmware to the board.
-6. Open a Serial Monitor (e.g., TeraTerm, PuTTY) with `115200 bps, 8 data bits, no parity, 1 stop bit` to view the debug output.
+## Pin Configuration (Wiring Guide)
 
-## Pin Configuration
-*(Refer to `rover_motor.ioc` in STM32CubeMX for exact pinout)*
-- **USART2 TX/RX**: PA2 / PA3 (Connected to ST-LINK VCP)
-- **Encoders**: TIM1, TIM4, TIM5, TIM8
-- **PWM Outputs**: TIM2, TIM3, TIM12
+### 1. Drive Motors (Cytron MDD3A)
+| Motor | STM32 Pin | Timer/Channel | Function |
+| :--- | :--- | :--- | :--- |
+| **M1** | PA5 / PB3 | `TIM2_CH1` / `CH2` | Motor 1 Forward / Reverse |
+| **M2** | PB14 / PB15 | `TIM12_CH1` / `CH2`| Motor 2 Forward / Reverse |
+| **M3** | PA6 / PA7 | `TIM3_CH1` / `CH2` | Motor 3 Forward / Reverse |
+| **M4** | PB0 / PB1 | `TIM3_CH3` / `CH2` | Motor 4 Forward / Reverse |
+
+### 2. Encoders (Quadrature x4)
+| Encoder | STM32 Pin | Timer | Note |
+| :--- | :--- | :--- | :--- |
+| **Enc 1** | PA8 / PA9 | `TIM1` | 16-bit Timer |
+| **Enc 2** | PB6 / PB7 | `TIM4` | 16-bit Timer |
+| **Enc 3** | PA0 / PA1 | `TIM5` | **32-bit Timer** |
+| **Enc 4** | PC6 / PC7 | `TIM8` | 16-bit Timer |
+
+### 3. Steering Servos (Feetech STS3215) & Power
+> **Direct Single-Wire Connection** (No external adapter needed)
+
+| STM32 Pin | Target Pin | Note |
+| :--- | :--- | :--- |
+| **PB10** (`USART3_TX`) | Servo **BUS (Data)** | Single-Wire HDSEL mode (Open-Drain). Connect directly to servo signal wire. |
+| **GND** | 12V Power **GND** | **MUST be connected to Common Ground!** |
+| **Not Connected** | Servo **VCC** | Connect servo VCC directly to external 12V supply (+). |
+
+### 4. Debug & Terminal Interface
+| STM32 Pin | Target Pin | Note |
+| :--- | :--- | :--- |
+| **PA2** (`USART2_TX`) | ST-LINK VCP | 115200 bps |
+| **PA3** (`USART2_RX`) | ST-LINK VCP | 115200 bps, Terminal Command Input |
+
+## How to Build
+This project uses a standard Makefile. 
+```bash
+make clean
+make -j4
+```
+Flash the resulting `build/rover_motor.elf` or `.hex` file using STM32CubeIDE or STM32CubeProgrammer.

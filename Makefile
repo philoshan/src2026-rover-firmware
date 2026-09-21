@@ -21,6 +21,8 @@ C_SOURCES = \
 Core/Src/main.c \
 Core/Src/motor.c \
 Core/Src/encoder.c \
+Core/Src/sts3215.c \
+Core/Src/joint.c \
 Core/Src/stm32f4xx_it.c \
 Core/Src/stm32f4xx_hal_msp.c \
 Core/Src/system_stm32f4xx.c \
@@ -88,7 +90,7 @@ CFLAGS += -MMD -MP -MF"$(@:%.o=%.d)"
 LDSCRIPT = STM32F446RETX_FLASH.ld
 LIBS = -lc -lm -lnosys
 LIBDIR =
-LDFLAGS = $(MCU) -specs=nano.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(BUILD_DIR)/$(TARGET).map,--cref -Wl,--gc-sections
+LDFLAGS = $(MCU) -specs=nano.specs -u _printf_float -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(BUILD_DIR)/$(TARGET).map,--cref -Wl,--gc-sections -Wl,--no-warn-rwx-segments
 
 #######################################
 # build the application

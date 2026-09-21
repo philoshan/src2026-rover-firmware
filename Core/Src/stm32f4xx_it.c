@@ -200,4 +200,15 @@ void SysTick_Handler(void)
 
 /* USER CODE BEGIN 1 */
 
+/* USART2 인터럽트 핸들러 (PC 터미널 명령 수신용) */
+extern void USART2_Process_Rx_Byte(uint8_t byte);
+void USART2_IRQHandler(void)
+{
+  if (USART2->SR & USART_SR_RXNE)
+  {
+    uint8_t byte = (uint8_t)(USART2->DR & 0xFF);
+    USART2_Process_Rx_Byte(byte);
+  }
+}
+
 /* USER CODE END 1 */
